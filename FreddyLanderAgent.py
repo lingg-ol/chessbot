@@ -1,9 +1,16 @@
+import math
 import numpy as np
 import random
 import torch
 from torch import nn
+from torch.nn import init
 import os
 
+
+def _init_random_weights(m):
+    if isinstance(m, nn.Linear):
+        init.xavier_uniform_(m.weight)
+        m.bias.data.fill_(0.01)
 
 class FreddyPolicy(nn.Module):
     def __init__(self, n_inputs: int):
@@ -13,16 +20,16 @@ class FreddyPolicy(nn.Module):
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(64, 1),
-            nn.ReLU()
+            nn.Linear(64, 1)
         )
+        self.relu_stack.apply(_init_random_weights)
 
     def forward(self, x):
         return self.relu_stack(x)
 
 
 class FreddyLanderAgent:
-    def __init__(self, random_samples: int = 1000, batch_size: int = 100, max_samples: int = 1000, inference: bool = False):
+    def __init__(self, random_samples: int = 1000, batch_size: int = 100, max_samples: int = 5000, inference: bool = False):
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"freddy lander uses device {self.device}")
         self.policy = FreddyPolicy(8).to(self.device)
@@ -34,6 +41,7 @@ class FreddyLanderAgent:
         self.random_samples = random_samples
 
         if not inference:
+            self.policy.train(True)
             self.loss = nn.MSELoss()
             self.optimizer = torch.optim.SGD(self.policy.parameters(), lr=0.001, momentum=0.9)
 
@@ -44,13 +52,14 @@ class FreddyLanderAgent:
             return random.choice([0, 1, 2, 3])
 
         with torch.no_grad():
-            qualities = [self.policy(torch.from_numpy(np.array([*observation, float(a)])).to(device=self.device, dtype=torch.float32)).numpy() for a in range(4)]
+            qualities = [self.policy(torch.from_numpy(np.array([*observation, float(a)])).to(device=self.device, dtype=torch.float32)).numpy()[0] for a in range(4)]
 
         if self.inference:
-            return np.argmax(qualities)
+            return int(np.argmax(qualities))
 
         # softmax on qualities
-        total = np.sum(qualities)
+        qualities = [math.exp(q) for q in qualities]
+        total = max(np.sum(qualities), 0.001)
         qualities = [q / total for q in qualities]
 
         # stochastic action selection
@@ -97,10 +106,8 @@ class FreddyLanderAgent:
             loss.backward()
             self.optimizer.step()
 
-            #print(loss.item())
-
     def save(self, path: os.PathLike):
         torch.save(self.policy.state_dict(), path)
 
     def load(self, path: os.PathLike):
-        self.policy.load_state_dict(path)
+        self.policy.load_state_dict(torch.load(path))
