@@ -14,7 +14,7 @@ class SimpleDQNAgent:
                 replay_buffer: ReplayBuffer,
                 batch_size: int = 128,
                 steps_per_training: int = 100,
-                q_target_lag: float = 0.1,
+                q_target_lag: float = 0.9,
                 discount_factor: float = 0.99,
                 epsilon_start: float = 1.0,
                 epsilon_end: float = 0.01,
@@ -36,7 +36,6 @@ class SimpleDQNAgent:
         self.q_target_lag = q_target_lag
         self.discount_factor = discount_factor
 
-        self.train_counter = 0
         self.optimizer = torch.optim.Adam(self.q_net.parameters(), lr=learning_rate)
 
     def get_action(self, observation):
@@ -52,7 +51,7 @@ class SimpleDQNAgent:
         if np.random.random() > self.epsilon:
             action = np.argmax(action_values)
         else:
-            action = np.random.choice([i for i in range(4)])
+            action = np.random.choice([i for i in range(len(action_values))])
         
 
         return action
@@ -63,8 +62,6 @@ class SimpleDQNAgent:
     def train(self):
         if self.buffer.size() >= self.batch_size:
             for _ in range(self.steps_per_training):
-                self.train_counter = self.train_counter + 1
-
                 # sample buffer
                 states, actions, terminals, rewards, next_states = self.buffer.sample(batch_size=self.batch_size)
 
@@ -81,6 +78,6 @@ class SimpleDQNAgent:
 
                 self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
 
-                if self.train_counter % 25 == 0:
-                    for target_param, local_param in zip(self.target_q_net.parameters(), self.q_net.parameters()):
-                        target_param.data.copy_(local_param.data)
+                for target_param, local_param in zip(self.target_q_net.parameters(), self.q_net.parameters()):
+                    target_interp = self.q_target_lag * target_param.data + (1 - self.q_target_lag) * local_param.data
+                    target_param.data.copy_(target_interp)
